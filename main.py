@@ -124,16 +124,13 @@ def main():
 
     # Step 4: Export per-channel reports
     print(f"\n[4/4] Exporting {len(analyses)} channel report(s) …")
-    conn = sqlite3.connect(config.DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
+    with sqlite3.connect(config.DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
         for ch_name, analysis in analyses.items():
             count = conn.execute(
                 "SELECT COUNT(*) FROM messages WHERE channel_name=?", (ch_name,)
             ).fetchone()[0]
             exporter.save_channel_report(ch_name, analysis, count)
-    finally:
-        conn.close()
 
     # Build and export master report
     print("\n  Building master report …")
