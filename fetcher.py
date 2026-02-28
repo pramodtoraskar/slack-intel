@@ -152,14 +152,26 @@ def fetch_threads(client, conn, channel_id, channel_name, users, thread_messages
             continue
         cursor = None
         while True:
-            resp = client.conversations_replies(
-                channel=channel_id,
-                ts=msg["ts"],
-                cursor=cursor,
-                limit=200,
-            )
+            try:
+                resp = client.conversations_replies(
+                    channel=channel_id,
+                    ts=msg["ts"],
+                    cursor=cursor,
+                    limit=200,
+                )
+            except Exception as e:
+                err_str = str(e).lower()
+                if "ratelimited" in err_str or "429" in err_str:
+                    retry_after = 60
+                    if hasattr(e, "headers") and e.headers:
+                        retry_after = int(e.headers.get("Retry-After", 60))
+                    print(f"  Thread rate limited, sleeping {retry_after}s …")
+                    time.sleep(retry_after)
+                    continue
+                raise
             # First message in replies is the parent — skip it
-            for r in resp["messages"][1:]:
+            replies = resp.get("messages", [])[1:]
+            for r in replies:
                 if should_skip(r):
                     continue
                 ts = float(r["ts"])
@@ -190,7 +202,7 @@ def fetch_channel(client, conn, channel_id, channel_name, users, backfill=False)
     """Fetch messages for one channel with checkpoint/resume.
 
     Normal mode:  fetches messages newer than last_ts (or last 90 days on first run).
-    Backfill mode: pages backward from oldest_ts already stored until full history done.
+    Backfill mode: pages backward through full history using cursor from Slack API.
     Checkpoints every page so an interrupted run resumes from where it left off.
     """
     state = conn.execute(
@@ -203,9 +215,11 @@ def fetch_channel(client, conn, channel_id, channel_name, users, backfill=False)
         if state and state["is_complete"]:
             print(f"  [{channel_name}] backfill already complete, skipping")
             return
-        # Start from oldest already seen, or now if nothing fetched yet
+        # Resume from saved cursor if available, otherwise start fresh
+        saved_cursor = state["last_cursor"] if state else None
         oldest = state["oldest_ts"] if state and state["oldest_ts"] else now_ts
     else:
+        saved_cursor = None
         if state and state["is_recent_complete"]:
             # Incremental: only fetch newer than last_ts
             oldest = state["last_ts"] if state and state["last_ts"] else (
@@ -215,16 +229,20 @@ def fetch_channel(client, conn, channel_id, channel_name, users, backfill=False)
             # First run: 90-day window
             oldest = now_ts - config.DAYS_BACK_DEFAULT * 86400
 
+    # next_cursor tracks pagination across loop iterations
+    next_cursor = saved_cursor
     page = 0
     total = 0
     thread_candidates = []
 
     while True:
         kwargs = dict(channel=channel_id, limit=200)
-        if backfill:
-            kwargs["latest"] = oldest       # page backward
+        if next_cursor:
+            kwargs["cursor"] = next_cursor  # advance pagination on each page
+        elif backfill:
+            kwargs["latest"] = oldest       # first backfill page: start from oldest known
         else:
-            kwargs["oldest"] = oldest       # page forward from cutoff
+            kwargs["oldest"] = oldest       # normal mode: only newer than cutoff
 
         try:
             resp = client.conversations_history(**kwargs)
@@ -246,7 +264,7 @@ def fetch_channel(client, conn, channel_id, channel_name, users, backfill=False)
         page += 1
         print(f"  [{channel_name}] page {page} — {stored} stored ({total} total)")
 
-        cursor = resp.get("response_metadata", {}).get("next_cursor")
+        next_cursor = resp.get("response_metadata", {}).get("next_cursor")
         has_more = resp.get("has_more", False)
 
         # Update checkpoint after every page
@@ -266,7 +284,7 @@ def fetch_channel(client, conn, channel_id, channel_name, users, backfill=False)
                 is_recent_complete=CASE WHEN excluded.is_recent_complete=1 THEN 1 ELSE is_recent_complete END,
                 message_count=message_count + excluded.message_count,
                 updated_at=excluded.updated_at
-        """, (channel_id, cursor if has_more else None,
+        """, (channel_id, next_cursor if has_more else None,
               last_ts, oldest_seen,
               1 if (backfill and not has_more) else 0,
               1 if (not backfill and not has_more) else 0,
