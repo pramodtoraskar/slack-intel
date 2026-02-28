@@ -10,29 +10,42 @@ import config
 # ── Database ──────────────────────────────────────────────────────────────────
 
 def get_db():
-    """Return a sqlite3 connection with WAL mode enabled."""
+    """Return a sqlite3 connection with WAL mode enabled.
+
+    Uses row_factory=sqlite3.Row so all query results support both index
+    and column-name access: row[0] and row['column_name'] both work.
+    """
     conn = sqlite3.connect(config.DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")  # safe optimisation for WAL mode
     return conn
 
 
 def init_db():
-    """Create all tables if they don't exist yet."""
+    """Create all tables and indexes if they don't exist yet.
+
+    Tables:
+      channels      — one row per Slack channel fetched
+      messages      — all fetched messages and thread replies
+      fetch_state   — checkpoint cursor per channel (is_complete = full history,
+                      is_recent_complete = 90-day window done)
+      analysis_state — tracks message_count at last LLM analysis per channel
+    """
     conn = get_db()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS channels (
             id          TEXT PRIMARY KEY,
-            name        TEXT,
+            name        TEXT NOT NULL,
             is_private  INTEGER,
             fetched_at  TEXT
         );
 
         CREATE TABLE IF NOT EXISTS messages (
             id           TEXT PRIMARY KEY,
-            channel_id   TEXT,
+            channel_id   TEXT NOT NULL,
             channel_name TEXT,
-            ts           REAL,
+            ts           REAL NOT NULL,
             date         TEXT,
             user_id      TEXT,
             user_name    TEXT,
@@ -42,8 +55,10 @@ def init_db():
             raw_json     TEXT
         );
 
-        CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id);
-        CREATE INDEX IF NOT EXISTS idx_messages_ts      ON messages(ts);
+        -- Composite index covers the most common query: messages for channel X ordered by time
+        CREATE INDEX IF NOT EXISTS idx_messages_channel_ts ON messages(channel_id, ts);
+        -- Individual ts index retained for ORDER BY ts queries without channel filter
+        CREATE INDEX IF NOT EXISTS idx_messages_ts ON messages(ts);
 
         CREATE TABLE IF NOT EXISTS fetch_state (
             channel_id         TEXT PRIMARY KEY,
