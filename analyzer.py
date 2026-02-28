@@ -119,7 +119,7 @@ def chunk_text(text, max_chars):
     current_len = 0
 
     for line in text.splitlines(keepends=True):
-        if current_len + len(line) > max_chars and current:
+        if current and current_len + len(line) > max_chars:
             chunks.append("".join(current))
             current = []
             current_len = 0
@@ -215,70 +215,83 @@ def analyze_all():
     Returns:
         dict mapping channel_name -> analysis_string for re-analyzed channels only.
     """
+    import os
+    if not os.path.exists(config.DB_PATH):
+        print("  DB not found — run main.py first to fetch Slack data.")
+        return {}
+
     conn = sqlite3.connect(config.DB_PATH)
     conn.row_factory = sqlite3.Row
 
-    # Get message counts per channel
-    counts = conn.execute("""
-        SELECT channel_name, channel_id, COUNT(*) as cnt
-        FROM messages GROUP BY channel_id
-    """).fetchall()
+    # Check schema exists
+    tables = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    ).fetchall()}
+    if "messages" not in tables:
+        print("  DB exists but schema not initialised — run main.py first.")
+        conn.close()
+        return {}
 
     results = {}
+    try:
+        counts = conn.execute("""
+            SELECT channel_name, channel_id, COUNT(*) as cnt
+            FROM messages GROUP BY channel_id
+        """).fetchall()
 
-    for row in counts:
-        ch_name = row["channel_name"]
-        ch_id = row["channel_id"]
-        msg_count = row["cnt"]
+        for row in counts:
+            ch_name = row["channel_name"]
+            ch_id = row["channel_id"]
+            msg_count = row["cnt"]
 
-        if msg_count < config.MIN_MESSAGES:
-            print(f"  [{ch_name}] skipping — only {msg_count} messages (< {config.MIN_MESSAGES})")
-            continue
+            if msg_count < config.MIN_MESSAGES:
+                print(f"  [{ch_name}] skipping — only {msg_count} messages (< {config.MIN_MESSAGES})")
+                continue
 
-        # Check if re-analysis is needed
-        state = conn.execute(
-            "SELECT message_count_at_analysis FROM analysis_state WHERE channel_id=?",
-            (ch_id,)
-        ).fetchone()
+            state = conn.execute(
+                "SELECT message_count_at_analysis FROM analysis_state WHERE channel_id=?",
+                (ch_id,)
+            ).fetchone()
 
-        if state and state["message_count_at_analysis"] == msg_count:
-            print(f"  [{ch_name}] no new messages since last analysis, skipping")
-            continue
+            if state and state["message_count_at_analysis"] == msg_count:
+                print(f"  [{ch_name}] no new messages since last analysis, skipping")
+                continue
 
-        print(f"\n→ Analyzing #{ch_name} ({msg_count} messages) …")
+            print(f"\n→ Analyzing #{ch_name} ({msg_count} messages) …")
 
-        rows = conn.execute("""
-            SELECT date, user_id, user_name, text, thread_ts, is_reply
-            FROM messages
-            WHERE channel_id=?
-            ORDER BY ts ASC
-        """, (ch_id,)).fetchall()
+            rows = conn.execute("""
+                SELECT date, user_id, user_name, text, thread_ts, is_reply
+                FROM messages
+                WHERE channel_id=?
+                ORDER BY ts ASC
+            """, (ch_id,)).fetchall()
 
-        formatted = format_messages(rows)
-        if not formatted.strip():
-            print(f"  [{ch_name}] no non-empty messages after formatting, skipping")
-            continue
+            formatted = format_messages(rows)
+            if not formatted.strip():
+                print(f"  [{ch_name}] no non-empty messages after formatting, skipping")
+                continue
 
-        analysis = analyze_channel(ch_name, formatted)
-        results[ch_name] = analysis
+            analysis = analyze_channel(ch_name, formatted)
+            results[ch_name] = analysis
 
-        # Update analysis_state — only after successful analysis
-        conn.execute("""
-            INSERT INTO analysis_state
-                (channel_id, channel_name, message_count_at_analysis, analyzed_at, report_path)
-            VALUES (?,?,?,?,?)
-            ON CONFLICT(channel_id) DO UPDATE SET
-                message_count_at_analysis=excluded.message_count_at_analysis,
-                analyzed_at=excluded.analyzed_at,
-                report_path=excluded.report_path
-        """, (
-            ch_id, ch_name, msg_count,
-            datetime.now(tz=timezone.utc).isoformat(),
-            f"{config.OUTPUT_DIR}/{ch_name}.md",
-        ))
-        conn.commit()
+            conn.execute("""
+                INSERT INTO analysis_state
+                    (channel_id, channel_name, message_count_at_analysis, analyzed_at, report_path)
+                VALUES (?,?,?,?,?)
+                ON CONFLICT(channel_id) DO UPDATE SET
+                    message_count_at_analysis=excluded.message_count_at_analysis,
+                    analyzed_at=excluded.analyzed_at,
+                    report_path=excluded.report_path
+            """, (
+                ch_id, ch_name, msg_count,
+                datetime.now(tz=timezone.utc).isoformat(),
+                f"{config.OUTPUT_DIR}/{ch_name}.md",
+            ))
+            conn.commit()
 
-    conn.close()
+    finally:
+        conn.close()
+
     return results
 
 
