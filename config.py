@@ -5,8 +5,8 @@ SLACK_TOKEN = ""          # Paste your token here: xoxb-...
 TARGET_CHANNELS = []      # e.g. ["general", "engineering", "product"]
 
 # --- Ollama ---
-OLLAMA_BASE = "http://localhost:11434"
-CHAT_MODEL = "llama3"
+OLLAMA_BASE = "http://localhost:11434"  # default Ollama server; change if remote
+CHAT_MODEL = "llama3"                   # must be pulled locally: `ollama pull llama3`
 CONTEXT_WINDOW = 6000     # safe character limit per LLM call
 
 # --- Fetch behaviour ---
@@ -19,4 +19,4 @@ DB_PATH = "./data/slack_intel.db"
 OUTPUT_DIR = "./data/output"
 
 # --- Dashboard ---
-DASHBOARD_PORT = 8080
+DASHBOARD_PORT = 8080     # web UI port: http://localhost:8080

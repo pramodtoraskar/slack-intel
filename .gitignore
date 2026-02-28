@@ -6,3 +6,10 @@ data/chroma/
 __pycache__/
 .env
 config_local.py
+
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+.DS_Store
