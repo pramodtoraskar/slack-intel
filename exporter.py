@@ -42,8 +42,8 @@ def save_channel_report(channel_name, analysis, message_count):
         json.dump({
             "channel": channel_name,
             "generated_at": generated_at,
-            "message_count": message_count,
             "analysis": analysis,
+            "message_count": message_count,
         }, f, indent=2, ensure_ascii=False)
     print(f"  Wrote {json_path}")
 
