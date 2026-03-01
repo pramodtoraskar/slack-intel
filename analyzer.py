@@ -8,6 +8,20 @@ from datetime import datetime, timezone
 import config
 
 
+def ensure_topic_notes_table(conn):
+    """Create topic_notes table if it does not exist. Safe to call multiple times."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS topic_notes (
+            topic      TEXT,
+            created_at TEXT,
+            key_notes  TEXT,
+            PRIMARY KEY (topic, created_at)
+        )
+    """)
+    conn.commit()
+
+
+
 # ── Ollama interface ──────────────────────────────────────────────────────────
 
 def ask(prompt):
