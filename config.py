@@ -20,3 +20,5 @@ OUTPUT_DIR = "./data/output"
 
 # --- Dashboard ---
 DASHBOARD_PORT = 8080     # web UI port: http://localhost:8080
+
+WATCHED_TOPICS = []   # e.g. ["API redesign", "auth service", "Q2 roadmap"]
