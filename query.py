@@ -56,17 +56,18 @@ def search_messages(conn, query, channel_name=None, limit=30):
             WHERE m.channel_name = ?
               AND ({conditions})
             ORDER BY m.ts DESC
-            LIMIT {limit}
+            LIMIT ?
         """
-        params = [channel_name] + params
+        params = [channel_name] + params + [limit]
     else:
         sql = f"""
             SELECT m.date, m.user_name, m.text, m.channel_name, m.is_reply, m.ts
             FROM messages m
             WHERE {conditions}
             ORDER BY m.ts DESC
-            LIMIT {limit}
+            LIMIT ?
         """
+        params = params + [limit]
 
     return conn.execute(sql, params).fetchall()
 
@@ -158,6 +159,14 @@ def run_query():
             print(f"  Found {len(rows)} relevant messages{scope_msg}. Asking Ollama …\n")
 
             context = format_context(rows)
+
+            # Guard: truncate context if it would exceed the LLM context window.
+            # Reserve ~500 chars for the prompt template and question text.
+            max_context_chars = config.CONTEXT_WINDOW - 500
+            if len(context) > max_context_chars:
+                context = context[:max_context_chars]
+                print(f"  (Context truncated to {max_context_chars:,} chars to fit context window)\n")
+
             prompt = RAG_PROMPT.format(question=question, context=context)
 
             try:
