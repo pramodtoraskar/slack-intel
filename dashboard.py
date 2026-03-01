@@ -9,6 +9,7 @@ import re
 import sqlite3
 import glob
 from datetime import datetime, timezone
+import html as _html
 import config
 
 
@@ -94,7 +95,11 @@ def md_to_html(text):
 
 
 def _inline(text):
-    """Apply inline markdown: **bold**, _italic_, `code`."""
+    """Apply inline markdown: **bold**, _italic_, `code`.
+    
+    Escapes raw HTML first to prevent XSS from untrusted markdown content.
+    """
+    text = _html.escape(text)
     text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
     text = re.sub(r'_(.+?)_', r'<em>\1</em>', text)
     text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
@@ -158,7 +163,8 @@ def _nav_html(channels, active=""):
     links = ""
     for ch in channels:
         cls = ' class="active"' if ch == active else ""
-        links += f'<a href="/channel/{ch}"{cls}>#{ch}</a>\n'
+        ch_safe = _html.escape(ch)
+        links += f'<a href="/channel/{ch_safe}"{cls}>#{ch_safe}</a>\n'
 
     master_cls = ' class="active"' if active == "__master__" else ""
     return f"""
@@ -223,12 +229,13 @@ def index_body(channels, conn):
     table_rows = ""
     for r in rows:
         analyzed_at = (r[2] or "")[:16].replace("T", " ")
+        ch_s = _html.escape(str(r[0]))
         table_rows += f"""
 <tr>
-  <td><a href="/channel/{r[0]}" class="channel-link">#{r[0]}</a></td>
+  <td><a href="/channel/{ch_s}" class="channel-link">#{ch_s}</a></td>
   <td style="text-align:center"><span class="badge">{r[1]:,}</span></td>
   <td style="color:#888">{analyzed_at} UTC</td>
-  <td><a href="/channel/{r[0]}" class="channel-link">View →</a></td>
+  <td><a href="/channel/{ch_s}" class="channel-link">View →</a></td>
 </tr>"""
 
     table = f"""
