@@ -110,6 +110,40 @@ Prefix a query with `#channel-name` to scope it to a single channel. Type `exit`
 
 ---
 
+## Topic Digests
+
+Gather cross-channel intelligence on any topic with a single command.
+
+### Interactive digest (in query.py)
+
+```
+> /digest API redesign
+> /digest --fresh auth service
+> #engineering /digest Q2 roadmap
+```
+
+- **`/digest Topic X`** — searches all channels, synthesizes a briefing, and stores key notes in SQLite. Future digests on the same topic inject prior notes as context, building cumulative intelligence over time.
+- **`/digest --fresh Topic X`** — same synthesis without prior context; useful for an unbiased fresh read.
+- **`#channel /digest Topic X`** — scopes the search to a single channel.
+
+### Auto-digest via main.py
+
+Add topics to `config.py`:
+
+```python
+WATCHED_TOPICS = ["API redesign", "auth service", "Q2 roadmap"]
+```
+
+Each `python main.py` run automatically generates digests for all watched topics as step 5.
+
+### Briefing sections
+
+Every digest produces: **Key Updates · Decisions Made · Open Questions · Next Steps · Sources**
+
+Reports are saved to `./data/output/topics/` and visible in the dashboard sidebar under **Topics**.
+
+---
+
 ## Output
 
 After each run, reports land in `./data/output/`:
