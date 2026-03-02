@@ -159,12 +159,52 @@ a.channel-link:hover { text-decoration: underline; }
 """
 
 
-def _nav_html(channels, active=""):
-    links = ""
+def _get_topics(output_dir):
+    """Return list of topic metadata dicts from OUTPUT_DIR/topics/*.json.
+
+    Each dict has: slug, topic, generated_at, sources, message_count.
+    Returns empty list if topics directory doesn't exist.
+    """
+    topics_dir = os.path.join(output_dir, "topics")
+    if not os.path.isdir(topics_dir):
+        return []
+    results = []
+    for path in sorted(glob.glob(os.path.join(topics_dir, "*.json"))):
+        try:
+            with open(path, encoding="utf-8") as f:
+                d = json.load(f)
+            results.append({
+                "slug": d.get("slug", os.path.basename(path).replace(".json", "")),
+                "topic": d.get("topic", ""),
+                "generated_at": d.get("generated_at", "")[:16].replace("T", " "),
+                "sources": d.get("sources", []),
+                "message_count": d.get("message_count", 0),
+            })
+        except Exception:
+            pass
+    return results
+
+
+def _nav_html(channels, topics=None, active=""):
+    topics = topics or []
+    ch_links = ""
     for ch in channels:
         cls = ' class="active"' if ch == active else ""
         ch_safe = _html.escape(ch)
-        links += f'<a href="/channel/{ch_safe}"{cls}>#{ch_safe}</a>\n'
+        ch_links += f'<a href="/channel/{ch_safe}"{cls}>#{ch_safe}</a>\n'
+
+    topic_links = ""
+    for t in topics:
+        slug = t["slug"]
+        cls = ' class="active"' if active == f"__topic__{slug}" else ""
+        t_safe = _html.escape(t["topic"])
+        topic_links += f'<a href="/topic/{slug}"{cls}>◆ {t_safe}</a>\n'
+
+    topic_section = ""
+    if topics:
+        topic_section = f"""
+  <div class="section-label">Topics</div>
+  {topic_links}"""
 
     master_cls = ' class="active"' if active == "__master__" else ""
     return f"""
@@ -172,13 +212,14 @@ def _nav_html(channels, active=""):
   <div class="brand">📊 Slack Intel</div>
   <div class="section-label">Reports</div>
   <a href="/master"{master_cls}>⭐ Master Report</a>
+  {topic_section}
   <div class="section-label">Channels</div>
-  {links}
+  {ch_links}
 </nav>"""
 
 
-def page(title, body, channels, active=""):
-    nav = _nav_html(channels, active)
+def page(title, body, channels, topics=None, active=""):
+    nav = _nav_html(channels, topics=topics, active=active)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -282,7 +323,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_html(page(
                 "Setup Required",
                 "<h1>Setup Required</h1><p>Run <code>python main.py</code> first.</p>",
-                []
+                [], topics=[]
             ))
             return
 
@@ -294,8 +335,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             channels = self._get_channels(conn)
 
             if path in ("/", ""):
+                topics = _get_topics(config.OUTPUT_DIR)
                 body = index_body(channels, conn)
-                self.send_html(page("Dashboard", body, channels))
+                self.send_html(page("Dashboard", body, channels, topics=topics))
 
             elif path.startswith("/channel/"):
                 ch = path[len("/channel/"):]
@@ -303,26 +345,47 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not re.match(r'^[\w\-]+$', ch):
                     self.send_html(page("Error", "<h2>Invalid channel name.</h2>", channels), 400)
                     return
+                topics = _get_topics(config.OUTPUT_DIR)
                 md_path = os.path.join(config.OUTPUT_DIR, f"{ch}.md")
                 if not os.path.exists(md_path):
                     body = f"<h2>No report for #{ch}</h2><p>Run <code>python main.py</code> to generate reports.</p>"
-                    self.send_html(page(f"#{ch}", body, channels), 404)
+                    self.send_html(page(f"#{ch}", body, channels, topics=topics), 404)
                     return
                 with open(md_path, encoding="utf-8") as f:
                     content = f.read()
                 body = md_to_html(content)
-                self.send_html(page(f"#{ch}", body, channels, active=ch))
+                self.send_html(page(f"#{ch}", body, channels, topics=topics, active=ch))
 
             elif path == "/master":
+                topics = _get_topics(config.OUTPUT_DIR)
                 masters = sorted(glob.glob(os.path.join(config.OUTPUT_DIR, "master_*.md")))
                 if not masters:
                     body = "<h2>No master report yet</h2><p>Run <code>python main.py</code> first.</p>"
-                    self.send_html(page("Master Report", body, channels))
+                    self.send_html(page("Master Report", body, channels, topics=topics))
                     return
                 with open(masters[-1], encoding="utf-8") as f:
                     content = f.read()
                 body = md_to_html(content)
-                self.send_html(page("Master Report", body, channels, active="__master__"))
+                self.send_html(page("Master Report", body, channels, topics=topics, active="__master__"))
+
+            elif path.startswith("/topic/"):
+                slug = path[len("/topic/"):]
+                if not re.match(r'^[\w\-]+$', slug):
+                    self.send_html(page("Error", "<h2>Invalid topic.</h2>", channels), 400)
+                    return
+                topics = _get_topics(config.OUTPUT_DIR)
+                md_path = os.path.join(config.OUTPUT_DIR, "topics", f"{slug}.md")
+                if not os.path.exists(md_path):
+                    body = (f"<h2>No digest for '{slug}'</h2>"
+                            "<p>Run <code>python query.py</code> and use "
+                            "<code>/digest your topic</code>.</p>")
+                    self.send_html(page(slug, body, channels, topics=topics), 404)
+                    return
+                with open(md_path, encoding="utf-8") as f:
+                    content = f.read()
+                body = md_to_html(content)
+                self.send_html(page(slug, body, channels, topics=topics,
+                                    active=f"__topic__{slug}"))
 
             elif path == "/api/status":
                 total = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
