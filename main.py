@@ -102,16 +102,16 @@ def main():
     print("=" * 60)
 
     # Step 1: Health check
-    print("\n[1/4] Health check …")
+    print("\n[1/5] Health check …")
     health_check()
 
     # Step 2: Fetch
     mode_label = "BACKFILL (full history)" if backfill else f"RECENT ({config.DAYS_BACK_DEFAULT} days)"
-    print(f"\n[2/4] Fetching Slack data [{mode_label}] …")
+    print(f"\n[2/5] Fetching Slack data [{mode_label}] …")
     fetcher.run_fetch(backfill=backfill)
 
     # Step 3: Analyze
-    print("\n[3/4] Analyzing channels …")
+    print("\n[3/5] Analyzing channels …")
     analyses = analyzer.analyze_all()
 
     if not analyses:
@@ -123,7 +123,7 @@ def main():
         return
 
     # Step 4: Export per-channel reports
-    print(f"\n[4/4] Exporting {len(analyses)} channel report(s) …")
+    print(f"\n[4/5] Exporting {len(analyses)} channel report(s) …")
     with sqlite3.connect(config.DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         for ch_name, analysis in analyses.items():
@@ -136,6 +136,23 @@ def main():
     print("\n  Building master report …")
     master = analyzer.build_master(analyses)
     exporter.save_master_report(master, list(analyses.keys()))
+
+    # Step 5: Auto-digest watched topics
+    if config.WATCHED_TOPICS:
+        print(f"\n[5/5] Auto-digest for {len(config.WATCHED_TOPICS)} watched topic(s) ...")
+        import query as _query
+        with sqlite3.connect(config.DB_PATH) as dconn:
+            dconn.row_factory = sqlite3.Row
+            for topic in config.WATCHED_TOPICS:
+                try:
+                    _query.run_digest(dconn, topic)
+                    slug = analyzer._slugify(topic)
+                    print(f"  \u2713 {topic} -> {config.OUTPUT_DIR}/topics/{slug}.md")
+                except Exception as e:
+                    print(f"  \u26a0 Skipped '{topic}': {e}")
+    else:
+        print("\n[5/5] Topic digests \u2014 skipped (WATCHED_TOPICS is empty in config.py)")
+        print("  Tip: set WATCHED_TOPICS = ['your topic'] in config.py to auto-digest")
 
     print("\n" + "=" * 60)
     print("  ✓ Done!")
