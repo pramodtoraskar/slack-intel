@@ -8,6 +8,20 @@ from datetime import datetime, timezone
 import config
 
 
+def ensure_topic_notes_table(conn):
+    """Create topic_notes table if it does not exist. Safe to call multiple times."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS topic_notes (
+            topic      TEXT,
+            created_at TEXT,
+            key_notes  TEXT,
+            PRIMARY KEY (topic, created_at)
+        )
+    """)
+    conn.commit()
+
+
+
 # ── Ollama interface ──────────────────────────────────────────────────────────
 
 def ask(prompt):
@@ -201,6 +215,124 @@ def build_master(channel_analyses):
     prompt = MASTER_PROMPT.format(channel_analyses=combined)
     print(f"  Building master report from {len(channel_analyses)} channels …")
     return ask(prompt)
+
+
+# ── Topic digest ──────────────────────────────────────────────────────────────
+
+TOPIC_PROMPT = """You are analyzing Slack conversations to build a topic intelligence briefing.
+
+Topic: {topic}
+Channels searched: {channels}
+Message count: {message_count}
+{prior_section}
+Messages:
+{messages}
+
+Produce a briefing with EXACTLY these sections (use ## headings):
+
+## Key Updates
+The most important recent developments related to this topic.
+
+## Decisions Made
+Any decisions, agreements, or conclusions reached.
+
+## Open Questions
+Unresolved questions, blockers, or items awaiting action.
+
+## Next Steps
+Upcoming actions, commitments, or plans mentioned.
+
+## Sources
+List the channels that contributed messages to this briefing.
+
+Be concise. Use bullet points where appropriate.
+"""
+
+
+def _slugify(text):
+    """Convert topic name to a safe filename slug.
+
+    e.g. "API Redesign!" -> "api-redesign"
+    """
+    import re as _re
+    slug = text.lower().strip()
+    slug = _re.sub(r'[^\w\s-]', '', slug)
+    slug = _re.sub(r'[\s_]+', '-', slug)
+    slug = _re.sub(r'-+', '-', slug)
+    return slug.strip('-')
+
+
+def _topic_prompt(topic, formatted_messages, prior_notes, channels="all channels",
+                  message_count=0):
+    """Build the topic digest prompt.
+
+    Injects prior_notes as a 'Prior Intelligence' section when provided.
+    """
+    prior_section = ""
+    if prior_notes:
+        prior_section = f"\n== Prior Intelligence ==\n{prior_notes}\n"
+
+    return TOPIC_PROMPT.format(
+        topic=topic,
+        channels=channels,
+        message_count=message_count,
+        prior_section=prior_section,
+        messages=formatted_messages,
+    )
+
+
+def build_topic_digest(topic, messages, prior_notes=None):
+    """Synthesize a topic intelligence briefing from a list of message rows.
+
+    Args:
+        topic:       Topic keyword string (used in prompt + filename slug).
+        messages:    List of sqlite3.Row objects with (date, user_name, text,
+                     channel_name, is_reply) columns.
+        prior_notes: Prior briefing text to inject as context (persistent mode).
+                     Pass None for fresh/stateless mode.
+
+    Returns:
+        Tuple of (briefing_str, sources_list) where sources_list is the
+        distinct channel names that contributed messages.
+    """
+    if not messages:
+        return None, []
+
+    sources = sorted({r["channel_name"] for r in messages if r["channel_name"]})
+    formatted = format_messages(messages)
+    channels_str = ", ".join(f"#{s}" for s in sources) if sources else "all channels"
+
+    # Chunk if needed
+    chunks = chunk_text(formatted, config.CONTEXT_WINDOW)
+    print(f"  [topic:{topic}] {len(messages)} messages, {len(chunks)} chunk(s), "
+          f"sources: {channels_str}")
+
+    if len(chunks) == 1:
+        prompt = _topic_prompt(topic, chunks[0], prior_notes,
+                               channels=channels_str,
+                               message_count=len(messages))
+        return ask(prompt), sources
+
+    # Multi-chunk: analyze each chunk then merge
+    partials = []
+    for i, chunk in enumerate(chunks, 1):
+        print(f"  [topic:{topic}] chunk {i}/{len(chunks)} ...")
+        p = _topic_prompt(topic, chunk, prior_notes=None,
+                          channels=channels_str, message_count=len(messages))
+        partials.append(f"=== Part {i} ===\n{ask(p)}")
+
+    print(f"  [topic:{topic}] synthesising {len(chunks)} chunks ...")
+    merge = (
+        f"Synthesise these partial topic briefings for '{topic}' into ONE coherent "
+        f"briefing with sections: "
+        f"## Key Updates, ## Decisions Made, ## Open Questions, "
+        f"## Next Steps, ## Sources\n\n"
+        + "\n\n".join(partials)
+    )
+    if prior_notes:
+        merge = f"== Prior Intelligence ==\n{prior_notes}\n\n" + merge
+
+    return ask(merge), sources
 
 
 # ── Entry point (reads from SQLite) ──────────────────────────────────────────

@@ -11,13 +11,16 @@ import config
 import analyzer   # reuse ask()
 
 HELP_TEXT = """
-╔══════════════════════════════════════════════╗
-║     Slack Intelligence — Interactive Q&A     ║
-╠══════════════════════════════════════════════╣
-║  Type a question to search all channels.     ║
-║  #channel question  to scope to one channel. ║
-║  Type 'exit' to quit.                        ║
-╚══════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════╗
+║     Slack Intelligence — Interactive Q&A             ║
+╠══════════════════════════════════════════════════════╣
+║  Type a question to search all channels.             ║
+║  #channel question     scope to one channel.         ║
+║  /digest Topic X       cross-channel topic digest.   ║
+║  /digest --fresh X     digest without prior context. ║
+║  #ch /digest Topic X   channel-scoped digest.        ║
+║  Type 'exit' to quit.                                ║
+╚══════════════════════════════════════════════════════╝
 """
 
 RAG_PROMPT = """\
@@ -106,6 +109,127 @@ def parse_input(user_input):
         return m.group(2).strip(), m.group(1).lower()
     return user_input.strip(), None
 
+def is_digest_command(user_input):
+    """Return True if the input is a /digest command (any form)."""
+    stripped = user_input.strip()
+    # Plain: /digest ...
+    if re.match(r'^/digest\b', stripped):
+        return True
+    # Channel-scoped: #channel /digest ...
+    if re.match(r'^#\S+\s+/digest\b', stripped):
+        return True
+    return False
+
+
+def parse_digest_input(user_input):
+    """Parse a /digest command into (topic, channel_or_None, mode).
+
+    Supported forms:
+      /digest Topic X                  -> ("Topic X", None, "persistent")
+      /digest --fresh Topic X          -> ("Topic X", None, "fresh")
+      #channel /digest Topic X         -> ("Topic X", "channel", "persistent")
+      #channel /digest --fresh Topic X -> ("Topic X", "channel", "fresh")
+
+    Returns:
+        (topic_str, channel_name_or_None, mode_str)
+        mode_str is "persistent" or "fresh"
+    """
+    s = user_input.strip()
+    channel = None
+
+    # Strip leading #channel if present
+    m = re.match(r'^#(\S+)\s+(.*)', s)
+    if m:
+        channel = m.group(1).lower()
+        s = m.group(2).strip()
+
+    # Must start with /digest
+    m = re.match(r'^/digest\s+(.*)', s)
+    if not m:
+        return "", channel, "persistent"
+
+    rest = m.group(1).strip()
+
+    # Check for --fresh flag
+    mode = "persistent"
+    if rest.startswith("--fresh"):
+        mode = "fresh"
+        rest = rest[len("--fresh"):].strip()
+
+    return rest.strip(), channel, mode
+
+
+
+def run_digest(conn, topic, channel=None, fresh=False):
+    """Execute a topic digest and save results.
+
+    Searches for messages matching the topic keyword, synthesizes a briefing
+    via Ollama, persists key notes in topic_notes, and saves reports.
+
+    Args:
+        conn:    Open sqlite3 connection (row_factory=sqlite3.Row set).
+        topic:   Topic keyword string.
+        channel: Optional channel name to scope the search.
+        fresh:   If True, ignore prior notes (stateless mode).
+    """
+    import analyzer
+    import exporter
+    from datetime import datetime, timezone
+
+    print(f"\n  Searching for topic: '{topic}'"
+          + (f" in #{channel}" if channel else " across all channels") + " ...\n")
+
+    rows = search_messages(conn, topic, channel_name=channel, limit=50)
+    if not rows:
+        print(f"  No messages found matching '{topic}'.\n")
+        return
+
+    words = re.findall(r'\w+', topic.lower())
+    rows = score_and_rank(rows, words)
+
+    # Load prior notes unless fresh mode
+    prior_notes = None
+    if not fresh:
+        analyzer.ensure_topic_notes_table(conn)
+        row = conn.execute(
+            "SELECT key_notes FROM topic_notes WHERE topic=? ORDER BY created_at DESC LIMIT 1",
+            (topic.lower(),)
+        ).fetchone()
+        if row:
+            prior_notes = row["key_notes"]
+            print(f"  Injecting prior intelligence ({len(prior_notes):,} chars) ...\n")
+
+    print(f"  Found {len(rows)} relevant messages. Synthesizing with Ollama ...\n")
+
+    briefing, sources = analyzer.build_topic_digest(topic, rows, prior_notes=prior_notes)
+
+    if not briefing:
+        print(f"  Could not generate digest for '{topic}'.\n")
+        return
+
+    # Print to terminal
+    print(f"\n{'='*60}")
+    print(f"  TOPIC DIGEST: {topic.upper()}")
+    print(f"{'='*60}\n")
+    print(briefing)
+    print()
+
+    # Persist notes (persistent mode only)
+    slug = analyzer._slugify(topic)
+    if not fresh:
+        analyzer.ensure_topic_notes_table(conn)
+        conn.execute(
+            "INSERT OR REPLACE INTO topic_notes (topic, created_at, key_notes) VALUES (?,?,?)",
+            (topic.lower(), datetime.now(tz=timezone.utc).isoformat(), briefing)
+        )
+        conn.commit()
+
+    # Save report files
+    exporter.save_topic_report(slug, topic, briefing, sources=sources,
+                               message_count=len(rows))
+    print(f"\n  Report saved -> data/output/topics/{slug}.md")
+    print(f"  View in dashboard -> http://localhost:{__import__('config').DASHBOARD_PORT}/topic/{slug}\n")
+
 
 def run_query():
     """Main interactive Q&A loop."""
@@ -140,6 +264,18 @@ def run_query():
             if user_input.lower() in ("exit", "quit", "q"):
                 print("Bye.")
                 break
+
+            # Digest command
+            if is_digest_command(user_input):
+                topic, ch, mode = parse_digest_input(user_input)
+                if not topic:
+                    print("  Usage: /digest <topic>  or  /digest --fresh <topic>\n")
+                    continue
+                try:
+                    run_digest(conn, topic, channel=ch, fresh=(mode == "fresh"))
+                except Exception as e:
+                    print(f"  Error running digest: {e}\n")
+                continue
 
             question, channel = parse_input(user_input)
             if not question:

@@ -92,6 +92,72 @@ def save_master_report(analysis, channel_names):
     return md_path, json_path
 
 
+
+def save_topic_report(slug, topic, briefing, sources, message_count):
+    """Write topic digest as latest + snapshot .md and .json.
+
+    Latest:   OUTPUT_DIR/topics/{slug}.md  and .json  (always overwritten)
+    Snapshot: OUTPUT_DIR/topics/{slug}/{timestamp}.md and .json (history)
+
+    Args:
+        slug:          URL-safe filename slug (from analyzer._slugify)
+        topic:         Human-readable topic name
+        briefing:      Full LLM briefing text (markdown)
+        sources:       List of channel name strings that contributed
+        message_count: Number of messages searched
+
+    Returns:
+        Tuple of (md_path, json_path) for the latest files.
+    """
+    topics_dir = os.path.join(config.OUTPUT_DIR, "topics")
+    snapshot_dir = os.path.join(topics_dir, slug)
+    os.makedirs(topics_dir, exist_ok=True)
+    os.makedirs(snapshot_dir, exist_ok=True)
+
+    generated_at = datetime.now(tz=timezone.utc).isoformat()
+    ts_label = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M")
+    sources_str = ", ".join(f"#{s}" for s in sources) if sources else "all channels"
+
+    payload = {
+        "topic": topic,
+        "slug": slug,
+        "generated_at": generated_at,
+        "key_notes": briefing,
+        "sources": sources,
+        "message_count": message_count,
+    }
+
+    # Latest files (overwritten each run)
+    md_path = os.path.join(topics_dir, f"{slug}.md")
+    json_path = os.path.join(topics_dir, f"{slug}.json")
+
+    with open(md_path, "w", encoding="utf-8") as f:
+        f.write(f"# Topic Digest: {topic}\n\n")
+        f.write(f"_Generated: {generated_at}_  \n")
+        f.write(f"_Sources: {sources_str}_  \n")
+        f.write(f"_Messages searched: {message_count:,}_\n\n")
+        f.write("---\n\n")
+        f.write(briefing)
+
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+
+    # Snapshot files (history)
+    snap_md = os.path.join(snapshot_dir, f"{ts_label}.md")
+    snap_json = os.path.join(snapshot_dir, f"{ts_label}.json")
+
+    with open(snap_md, "w", encoding="utf-8") as f:
+        f.write(f"# Topic Digest: {topic} ({ts_label})\n\n")
+        f.write(f"_Generated: {generated_at}_  \n")
+        f.write(f"_Sources: {sources_str}_\n\n---\n\n")
+        f.write(briefing)
+
+    with open(snap_json, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+
+    print(f"  Wrote {md_path}")
+    return md_path, json_path
+
 if __name__ == "__main__":
     # Smoke test: write dummy reports to verify output directory and file creation
     test_analysis = """## Historical Context
