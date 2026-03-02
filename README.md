@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.svg" width="100" height="100" alt="Slack Intel logo"/>
+</p>
+
 # Slack Intelligence Agent
 
 **A fully local pipeline for fetching, analyzing, and querying your Slack history — no cloud LLM, no data leaves your machine.**

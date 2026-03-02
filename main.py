@@ -98,7 +98,7 @@ def main():
     backfill = "--backfill" in sys.argv
 
     print("=" * 60)
-    print("  SLACK INTELLIGENCE AGENT")
+    print("  [#\U0001f50d] SLACK INTELLIGENCE AGENT")
     print("=" * 60)
 
     # Step 1: Health check
