@@ -106,6 +106,56 @@ def parse_input(user_input):
         return m.group(2).strip(), m.group(1).lower()
     return user_input.strip(), None
 
+def is_digest_command(user_input):
+    """Return True if the input is a /digest command (any form)."""
+    stripped = user_input.strip()
+    # Plain: /digest ...
+    if re.match(r'^/digest\b', stripped):
+        return True
+    # Channel-scoped: #channel /digest ...
+    if re.match(r'^#\S+\s+/digest\b', stripped):
+        return True
+    return False
+
+
+def parse_digest_input(user_input):
+    """Parse a /digest command into (topic, channel_or_None, mode).
+
+    Supported forms:
+      /digest Topic X                  -> ("Topic X", None, "persistent")
+      /digest --fresh Topic X          -> ("Topic X", None, "fresh")
+      #channel /digest Topic X         -> ("Topic X", "channel", "persistent")
+      #channel /digest --fresh Topic X -> ("Topic X", "channel", "fresh")
+
+    Returns:
+        (topic_str, channel_name_or_None, mode_str)
+        mode_str is "persistent" or "fresh"
+    """
+    s = user_input.strip()
+    channel = None
+
+    # Strip leading #channel if present
+    m = re.match(r'^#(\S+)\s+(.*)', s)
+    if m:
+        channel = m.group(1).lower()
+        s = m.group(2).strip()
+
+    # Must start with /digest
+    m = re.match(r'^/digest\s+(.*)', s)
+    if not m:
+        return "", channel, "persistent"
+
+    rest = m.group(1).strip()
+
+    # Check for --fresh flag
+    mode = "persistent"
+    if rest.startswith("--fresh"):
+        mode = "fresh"
+        rest = rest[len("--fresh"):].strip()
+
+    return rest.strip(), channel, mode
+
+
 
 def run_query():
     """Main interactive Q&A loop."""
