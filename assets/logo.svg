@@ -1,0 +1,13 @@
+<svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Magnifying glass circle -->
+  <circle cx="86" cy="86" r="58" stroke="#4a90d9" stroke-width="14" fill="#0f1117"/>
+  <!-- Handle -->
+  <line x1="130" y1="130" x2="178" y2="178" stroke="#4a90d9" stroke-width="14" stroke-linecap="round"/>
+  <!-- # symbol -->
+  <!-- Vertical bars -->
+  <line x1="72"  y1="58" x2="64"  y2="114" stroke="#f8fafc" stroke-width="9" stroke-linecap="round"/>
+  <line x1="96"  y1="58" x2="88"  y2="114" stroke="#f8fafc" stroke-width="9" stroke-linecap="round"/>
+  <!-- Horizontal bars -->
+  <line x1="56"  y1="78" x2="104" y2="78"  stroke="#f8fafc" stroke-width="8" stroke-linecap="round"/>
+  <line x1="52"  y1="96" x2="100" y2="96"  stroke="#f8fafc" stroke-width="8" stroke-linecap="round"/>
+</svg>

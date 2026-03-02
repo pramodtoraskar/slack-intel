@@ -114,8 +114,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
        margin: 0; display: flex; height: 100vh; background: #f8f9fa; color: #1a1d21; }
 nav { width: 230px; min-width: 230px; background: #1a1d21; color: #d1d2d3;
       overflow-y: auto; display: flex; flex-direction: column; }
-nav .brand { padding: 18px 16px 12px; font-size: 16px; font-weight: 700;
-             color: #fff; border-bottom: 1px solid #2d3139; }
+nav .brand { padding: 14px 16px 12px; font-size: 16px; font-weight: 700;
+             color: #fff; border-bottom: 1px solid #2d3139;
+             display: flex; align-items: center; gap: 10px; }
+nav .brand img { width: 28px; height: 28px; flex-shrink: 0; }
 nav .section-label { padding: 12px 16px 4px; font-size: 11px; color: #868686;
                      text-transform: uppercase; letter-spacing: .08em; }
 nav a { display: block; padding: 6px 16px; color: #d1d2d3; text-decoration: none;
@@ -209,7 +211,7 @@ def _nav_html(channels, topics=None, active=""):
     master_cls = ' class="active"' if active == "__master__" else ""
     return f"""
 <nav>
-  <div class="brand">📊 Slack Intel</div>
+  <div class="brand"><img src="/assets/logo.svg" alt="">Slack Intel</div>
   <div class="section-label">Reports</div>
   <a href="/master"{master_cls}>⭐ Master Report</a>
   {topic_section}
@@ -226,6 +228,7 @@ def page(title, body, channels, topics=None, active=""):
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{title} — Slack Intel</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/logo.svg">
   <style>{CSS}</style>
 </head>
 <body>
@@ -333,6 +336,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         try:
             channels = self._get_channels(conn)
+
+            if path == "/assets/logo.svg":
+                logo_path = os.path.join(os.path.dirname(__file__), "assets", "logo.svg")
+                if os.path.exists(logo_path):
+                    with open(logo_path, "rb") as f:
+                        data = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/svg+xml")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+                conn.close()
+                return
 
             if path in ("/", ""):
                 topics = _get_topics(config.OUTPUT_DIR)
