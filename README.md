@@ -22,6 +22,21 @@ Slack Intelligence Agent pulls your Slack channel history into a local SQLite da
 
 ---
 
+## Slack Intelligence Agent vs Slack AI (Native)
+
+| | **Slack Intelligence Agent** | **Slack AI (Salesforce Native)** |
+|---|---|---|
+| **Data residency** | Fully local — data never leaves your environment | Cloud-based; data sent to Salesforce/OpenAI infrastructure |
+| **LLM** | Ollama-powered (llama3 / llama3.1) + SQLite | Built-in summarization backed by OpenAI |
+| **Control** | Multi-agent Python pipeline you own and modify | Fixed to Slack's predefined use cases |
+| **Coverage** | Analyzes 20+ channels with custom logic | Limited to thread recaps, search, and channel summaries |
+| **Customization** | You own the schema, the queries, and the outputs | No customization of the intelligence layer |
+| **Specialized use cases** | Adaptable to any team workflow or specific intelligence need | General-purpose only |
+| **Setup complexity** | Requires Python, Ollama, and a Slack bot token | Zero setup — works out of the box |
+| **Cost** | No subscription cost beyond local compute | Extra charge on top of Slack subscription |
+
+---
+
 ## Prerequisites
 
 | Requirement | Notes |
